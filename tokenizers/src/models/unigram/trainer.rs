@@ -2,10 +2,10 @@ use crate::models::unigram::{lattice::Lattice, model::Unigram};
 use crate::tokenizer::{AddedToken, Result, Trainer};
 use crate::utils::parallelism::*;
 use crate::utils::progress::{ProgressBar, ProgressStyle};
+use ahash::{AHashMap, AHashSet};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use ahash::{AHashMap, AHashSet};
 use std::convert::TryInto;
 
 // A token and a score

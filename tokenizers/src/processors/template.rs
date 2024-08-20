@@ -57,11 +57,11 @@
 //! [`TemplateProcessing`]: struct.TemplateProcessing.html
 //!
 use crate::{Encoding, PostProcessor, Result};
+use ahash::{AHashMap, AHashSet};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 use std::result::Result as StdResult;
-use ahash::{AHashMap, AHashSet};
 
 /// Represents any sequences received as input of the PostProcessor
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]

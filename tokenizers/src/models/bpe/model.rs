@@ -2,9 +2,9 @@ use super::{super::OrderedVocabIter, trainer::BpeTrainer, Error, Pair, Word};
 use crate::tokenizer::{Model, Result, Token};
 use crate::utils::cache::{Cache, DEFAULT_CACHE_CAPACITY};
 use crate::utils::iter::ResultShunt;
+use ahash::AHashMap;
 use serde_json::Value;
 use std::borrow::Cow;
-use ahash::AHashMap;
 
 use std::{
     fs::File,

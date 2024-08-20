@@ -1,10 +1,10 @@
 use super::{super::OrderedVocabIter, WordPiece, WordPieceBuilder};
+use ahash::AHashSet;
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use ahash::AHashSet;
 
 impl Serialize for WordPiece {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

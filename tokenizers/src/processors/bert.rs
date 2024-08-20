@@ -1,7 +1,7 @@
 use crate::tokenizer::{Encoding, PostProcessor, Result};
+use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use std::iter::FromIterator;
-use ahash::AHashMap;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "type")]
@@ -131,7 +131,8 @@ impl PostProcessor for BertProcessing {
 
                     // For compatibility with `TemplateProcessing`, the sequence_ranges shouldn't contain
                     // the special tokens.
-                    let pair_sequence_ranges = AHashMap::from_iter(vec![(1, 0..pair_ids.len() - 1)]);
+                    let pair_sequence_ranges =
+                        AHashMap::from_iter(vec![(1, 0..pair_ids.len() - 1)]);
                     Encoding::new(
                         pair_ids,
                         pair_type_ids,

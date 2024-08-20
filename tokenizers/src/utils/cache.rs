@@ -1,7 +1,7 @@
+use ahash::AHashMap;
 use std::borrow::Borrow;
 use std::hash::Hash;
 use std::sync::RwLock;
-use ahash::AHashMap;
 
 /// The default capacity for a `BPE`'s internal cache.
 pub static DEFAULT_CACHE_CAPACITY: usize = 10_000;

@@ -172,7 +172,6 @@ mod tests {
     use crate::tokenizer::Encoding;
     use ahash::AHashMap;
 
-
     fn get_empty() -> Encoding {
         Encoding::new(
             vec![],

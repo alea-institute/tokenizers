@@ -9,6 +9,7 @@
 //!   - [`PostProcessor`](trait.PostProcessor.html): Takes care of the processing after tokenization (like truncating, padding,
 //!     ...).
 
+use ahash::AHashMap;
 use std::{
     fs::{read_to_string, File},
     io::prelude::*,
@@ -16,8 +17,6 @@ use std::{
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
-use ahash::AHashMap;
-
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

@@ -17,9 +17,9 @@ pub mod parallelism;
 pub(crate) mod progress;
 pub mod truncation;
 
-use serde::{Serialize, Serializer};
-use std::collections::{BTreeMap};
 use ahash::AHashMap;
+use serde::{Serialize, Serializer};
+use std::collections::BTreeMap;
 
 pub(crate) fn ordered_map<S, K, V>(
     value: &AHashMap<K, V>,

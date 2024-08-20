@@ -1,8 +1,8 @@
 use super::Pair;
+use ahash::AHashMap;
+use dary_heap::QuaternaryHeap;
 use rand::{thread_rng, Rng};
 use std::cmp::Ordering;
-use dary_heap::QuaternaryHeap;
-use ahash::AHashMap;
 
 #[derive(Debug, Eq)]
 struct Merge {

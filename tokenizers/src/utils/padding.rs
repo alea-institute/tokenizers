@@ -86,7 +86,6 @@ mod tests {
     use crate::tokenizer::Encoding;
     use ahash::AHashMap;
 
-
     #[test]
     fn pad_to_multiple() {
         fn get_encodings() -> [Encoding; 2] {

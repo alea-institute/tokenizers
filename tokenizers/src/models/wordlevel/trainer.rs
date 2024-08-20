@@ -1,9 +1,9 @@
 use super::WordLevel;
 use crate::utils::parallelism::*;
 use crate::{AddedToken, Result, Trainer};
+use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use ahash::AHashMap;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Builder, Serialize, Deserialize)]

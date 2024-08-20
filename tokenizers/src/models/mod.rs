@@ -5,7 +5,7 @@ pub mod unigram;
 pub mod wordlevel;
 pub mod wordpiece;
 
-use ahash::{AHashMap};
+use ahash::AHashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

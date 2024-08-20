@@ -1,8 +1,8 @@
 use super::WordPiece;
 use crate::models::bpe::{BpeTrainer, BpeTrainerBuilder, BPE};
 use crate::tokenizer::{AddedToken, Result, Trainer};
-use serde::{Deserialize, Serialize};
 use ahash::AHashSet;
+use serde::{Deserialize, Serialize};
 
 /// A `WordPieceTrainerBuilder` can be used to create a `WordPieceTrainer` with a custom
 /// configuration.

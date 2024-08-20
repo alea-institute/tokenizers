@@ -1,7 +1,7 @@
 use super::OrderedVocabIter;
 use crate::tokenizer::{Model, Result, Token};
-use serde_json::Value;
 use ahash::AHashMap;
+use serde_json::Value;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
