@@ -7,7 +7,18 @@ use crate::utils::progress::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use dary_heap::OctonaryHeap;
-use ahash::{AHashMap, AHashSet};
+use ahash::{AHashMap, AHashSet, AHasher};
+use std::hash::{Hasher, Hash};
+
+
+type TokenHash = u64;
+
+fn compute_hash<T: Hash>(t: &T) -> TokenHash {
+    let mut s = AHasher::default();
+    t.hash(&mut s);
+    s.finish()
+}
+
 
 #[derive(Debug, Eq)]
 struct Merge {
@@ -252,11 +263,16 @@ impl BpeTrainer {
     }
 
     /// Add the provided special tokens to the initial vocabulary
-    fn add_special_tokens(&self, w2id: &mut AHashMap<String, u32>, id2w: &mut Vec<String>) {
+    fn add_special_tokens(&self, w2id: &mut AHashMap<u64, u32>, id2w: &mut Vec<String>) {
         for token in &self.special_tokens {
-            if !w2id.contains_key(&token.content) {
+            // get hash of content
+            let hash = compute_hash(&token.content);
+            if !w2id.contains_key(&hash) {
                 id2w.push(token.content.to_owned());
-                w2id.insert(token.content.to_owned(), (id2w.len() - 1) as u32);
+                w2id.insert(
+                    hash,
+                    (id2w.len() - 1) as u32
+                );
             }
         }
     }
@@ -265,7 +281,7 @@ impl BpeTrainer {
     fn compute_alphabet(
         &self,
         wc: &AHashMap<String, u64>,
-        w2id: &mut AHashMap<String, u32>,
+        w2id: &mut AHashMap<u64, u32>,
         id2w: &mut Vec<String>,
     ) {
         // Compute the alphabet from seen words
@@ -313,9 +329,17 @@ impl BpeTrainer {
         kept.sort_unstable_by_key(|k| (*k.0) as u32);
         kept.into_iter().for_each(|(c, _)| {
             let s = c.to_string();
+            /*
             if !w2id.contains_key(&s) {
                 id2w.push(s.clone());
                 w2id.insert(s, (id2w.len() - 1) as u32);
+            }
+            */
+            // u64 hash version
+            let hash = compute_hash(&s);
+            if !w2id.contains_key(&hash) {
+                id2w.push(s.clone());
+                w2id.insert(hash, (id2w.len() - 1) as u32);
             }
         });
     }
@@ -324,7 +348,7 @@ impl BpeTrainer {
     fn tokenize_words(
         &self,
         wc: &AHashMap<String, u64>,
-        w2id: &mut AHashMap<String, u32>,
+        w2id: &mut AHashMap<u64, u32>,
         id2w: &mut Vec<String>,
         p: &Option<ProgressBar>,
     ) -> (Vec<Word>, Vec<u64>) {
@@ -337,7 +361,8 @@ impl BpeTrainer {
 
             for (is_first, is_last, c) in word.chars().with_first_and_last() {
                 let mut s = c.to_string();
-                if w2id.contains_key(&s) {
+                let hash = compute_hash(&s);
+                if w2id.contains_key(&hash) {
                     // Found the initial char in the authorized alphabet
 
                     // Add the `continuing_subword_prefix` if relevant
@@ -354,11 +379,11 @@ impl BpeTrainer {
                     }
 
                     // Insert the new formed string if necessary
-                    if !w2id.contains_key(&s) {
+                    if !w2id.contains_key(&hash) {
                         id2w.push(s.clone());
-                        w2id.insert(s.clone(), (id2w.len() - 1) as u32);
+                        w2id.insert(hash, (id2w.len() - 1) as u32);
                     }
-                    current_word.add(w2id[&s], 1); // We do not care about the len here
+                    current_word.add(w2id[&hash], 1); // We do not care about the len here
                 }
             }
             words.push(current_word);
@@ -435,7 +460,7 @@ impl BpeTrainer {
         word_counts: &AHashMap<String, u64>,
         model: &mut BPE,
     ) -> Result<Vec<AddedToken>> {
-        let mut word_to_id: AHashMap<String, u32> = AHashMap::with_capacity(self.vocab_size);
+        let mut word_to_id: AHashMap<u64, u32> = AHashMap::with_capacity(self.vocab_size);
         let mut id_to_word: Vec<String> = Vec::with_capacity(self.vocab_size);
         let max_token_length: usize = self.max_token_length.unwrap_or(usize::MAX);
 
@@ -520,13 +545,14 @@ impl BpeTrainer {
             // default should be 0/None to maintain previous behavior. 16 is the spm default.
 
             // Insert new token if it does not already exist
+            let new_token_hash = compute_hash(&new_token);
             let new_token_id = word_to_id
-                .get(&new_token)
+                .get(&new_token_hash)
                 .copied()
                 .unwrap_or(id_to_word.len() as u32);
-            if !word_to_id.contains_key(&new_token) {
+            if !word_to_id.contains_key(&new_token_hash) {
                 id_to_word.push(new_token.clone());
-                word_to_id.insert(new_token.clone(), new_token_id);
+                word_to_id.insert(new_token_hash, new_token_id);
             }
             merges.push((top.pair, new_token_id));
 
@@ -587,7 +613,12 @@ impl BpeTrainer {
         self.finalize_progress(&progress, merges.len());
 
         // Transfer new vocab & options to model
-        model.vocab = word_to_id;
+        //model.vocab = word_to_id;
+        model.vocab = word_to_id
+            .into_iter()
+            // we have to look up the string in id_to_word because the key in word_to_id is a hash
+            .map(|(_key, val)| (id_to_word[val as usize].clone(), val))
+            .collect();
         model.vocab_r = model
             .vocab
             .iter()
