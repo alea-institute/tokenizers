@@ -170,7 +170,8 @@ pub fn truncate_encodings(
 mod tests {
     use super::*;
     use crate::tokenizer::Encoding;
-    use std::collections::HashMap;
+    use ahash::AHashMap;
+
 
     fn get_empty() -> Encoding {
         Encoding::new(
@@ -182,7 +183,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
-            HashMap::new(),
+            AHashMap::new(),
         )
     }
 
@@ -196,7 +197,7 @@ mod tests {
             vec![0, 0],
             vec![1, 1],
             vec![],
-            HashMap::new(),
+            AHashMap::new(),
         )
     }
 
@@ -215,7 +216,7 @@ mod tests {
             vec![0, 0, 0, 0],
             vec![1, 1, 1, 1],
             vec![],
-            HashMap::new(),
+            AHashMap::new(),
         )
     }
 
@@ -256,7 +257,7 @@ mod tests {
             vec![0, 0, 0, 0, 0, 0, 0, 0],
             vec![1, 1, 1, 1, 1, 1, 1, 1],
             vec![],
-            HashMap::new(),
+            AHashMap::new(),
         )
     }
 
