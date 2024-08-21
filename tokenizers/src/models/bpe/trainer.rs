@@ -4,12 +4,12 @@ use super::{Pair, WithFirstLastIterator, Word, BPE};
 use crate::parallelism::*;
 use crate::tokenizer::{AddedToken, Result, Trainer};
 use crate::utils::progress::{ProgressBar, ProgressStyle};
+use ahash::{AHashMap, AHashSet, AHasher};
+use compact_str::CompactString;
+use dary_heap::OctonaryHeap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use dary_heap::OctonaryHeap;
-use ahash::{AHashMap, AHashSet, AHasher};
-use std::hash::{Hasher, Hash};
-
+use std::hash::{Hash, Hasher};
 
 type TokenHash = u64;
 
@@ -18,7 +18,6 @@ fn compute_hash<T: Hash>(t: &T) -> TokenHash {
     t.hash(&mut s);
     s.finish()
 }
-
 
 #[derive(Debug, Eq)]
 struct Merge {
@@ -207,7 +206,7 @@ pub struct BpeTrainer {
     /// An optional parameter to limit the max length of any single token
     pub max_token_length: Option<usize>,
 
-    words: AHashMap<String, u64>,
+    words: AHashMap<CompactString, u64>,
 }
 
 impl Default for BpeTrainer {
@@ -263,16 +262,13 @@ impl BpeTrainer {
     }
 
     /// Add the provided special tokens to the initial vocabulary
-    fn add_special_tokens(&self, w2id: &mut AHashMap<u64, u32>, id2w: &mut Vec<String>) {
+    fn add_special_tokens(&self, w2id: &mut AHashMap<u64, u32>, id2w: &mut Vec<CompactString>) {
         for token in &self.special_tokens {
             // get hash of content
             let hash = compute_hash(&token.content);
             if !w2id.contains_key(&hash) {
-                id2w.push(token.content.to_owned());
-                w2id.insert(
-                    hash,
-                    (id2w.len() - 1) as u32
-                );
+                id2w.push(CompactString::from(&token.content));
+                w2id.insert(hash, (id2w.len() - 1) as u32);
             }
         }
     }
@@ -280,9 +276,9 @@ impl BpeTrainer {
     /// Compute the initial alphabet and limit it if relevant
     fn compute_alphabet(
         &self,
-        wc: &AHashMap<String, u64>,
+        wc: &AHashMap<CompactString, u64>,
         w2id: &mut AHashMap<u64, u32>,
-        id2w: &mut Vec<String>,
+        id2w: &mut Vec<CompactString>,
     ) {
         // Compute the alphabet from seen words
         let mut alphabet: AHashMap<char, usize> = AHashMap::new();
@@ -338,7 +334,7 @@ impl BpeTrainer {
             // u64 hash version
             let hash = compute_hash(&s);
             if !w2id.contains_key(&hash) {
-                id2w.push(s.clone());
+                id2w.push(CompactString::from(s));
                 w2id.insert(hash, (id2w.len() - 1) as u32);
             }
         });
@@ -347,9 +343,9 @@ impl BpeTrainer {
     /// Tokenize words and add subwords to the vocabulary when relevant
     fn tokenize_words(
         &self,
-        wc: &AHashMap<String, u64>,
+        wc: &AHashMap<CompactString, u64>,
         w2id: &mut AHashMap<u64, u32>,
-        id2w: &mut Vec<String>,
+        id2w: &mut Vec<CompactString>,
         p: &Option<ProgressBar>,
     ) -> (Vec<Word>, Vec<u64>) {
         let mut words: Vec<Word> = Vec::with_capacity(wc.len());
@@ -380,7 +376,7 @@ impl BpeTrainer {
 
                     // Insert the new formed string if necessary
                     if !w2id.contains_key(&hash) {
-                        id2w.push(s.clone());
+                        id2w.push(CompactString::from(s));
                         w2id.insert(hash, (id2w.len() - 1) as u32);
                     }
                     current_word.add(w2id[&hash], 1); // We do not care about the len here
@@ -457,11 +453,11 @@ impl BpeTrainer {
 
     pub fn do_train(
         &self,
-        word_counts: &AHashMap<String, u64>,
+        word_counts: &AHashMap<CompactString, u64>,
         model: &mut BPE,
     ) -> Result<Vec<AddedToken>> {
         let mut word_to_id: AHashMap<u64, u32> = AHashMap::with_capacity(self.vocab_size);
-        let mut id_to_word: Vec<String> = Vec::with_capacity(self.vocab_size);
+        let mut id_to_word: Vec<CompactString> = Vec::with_capacity(self.vocab_size);
         let max_token_length: usize = self.max_token_length.unwrap_or(usize::MAX);
 
         let progress = self.setup_progress();
@@ -536,7 +532,7 @@ impl BpeTrainer {
             if let Some(prefix) = &self.continuing_subword_prefix {
                 if part_b.starts_with(prefix) {
                     let prefix_byte_len = prefix.chars().map(|c| c.len_utf8()).sum();
-                    part_b = part_b[prefix_byte_len..].to_string();
+                    part_b = CompactString::from(&part_b[prefix_byte_len..]);
                 }
             }
             let new_token = format!("{}{}", part_a, part_b);
@@ -551,7 +547,7 @@ impl BpeTrainer {
                 .copied()
                 .unwrap_or(id_to_word.len() as u32);
             if !word_to_id.contains_key(&new_token_hash) {
-                id_to_word.push(new_token.clone());
+                id_to_word.push(CompactString::from(new_token));
                 word_to_id.insert(new_token_hash, new_token_id);
             }
             merges.push((top.pair, new_token_id));
@@ -617,7 +613,7 @@ impl BpeTrainer {
         model.vocab = word_to_id
             .into_iter()
             // we have to look up the string in id_to_word because the key in word_to_id is a hash
-            .map(|(_key, val)| (id_to_word[val as usize].clone(), val))
+            .map(|(_key, val)| (id_to_word[val as usize].to_string(), val))
             .collect();
         model.vocab_r = model
             .vocab
@@ -664,13 +660,15 @@ impl Trainer for BpeTrainer {
         S: AsRef<str> + Send,
         F: Fn(&str) -> Result<Vec<String>> + Sync,
     {
-        let words: Result<AHashMap<String, u64>> = iterator
+        let words: Result<AHashMap<CompactString, u64>> = iterator
             .maybe_par_bridge()
             .map(|sequence| {
                 let words = process(sequence.as_ref())?;
                 let mut map = AHashMap::new();
                 for word in words {
-                    map.entry(word).and_modify(|c| *c += 1).or_insert(1);
+                    map.entry(CompactString::from(word))
+                        .and_modify(|c| *c += 1)
+                        .or_insert(1);
                 }
                 Ok(map)
             })
@@ -694,10 +692,11 @@ impl Trainer for BpeTrainer {
 mod tests {
     use super::{BpeTrainer, Pair, BPE};
     use ahash::AHashMap;
+    use compact_str::CompactString;
 
     #[test]
     fn test_train() {
-        let word_counts: AHashMap<String, u64> = [
+        let word_counts: AHashMap<CompactString, u64> = [
             ("roses".into(), 1),
             ("are".into(), 2),
             ("red".into(), 1),
@@ -776,7 +775,7 @@ mod tests {
          */
 
         let max_token_length = 16;
-        let long_word_counts: AHashMap<String, u64> = [
+        let long_word_counts: AHashMap<CompactString, u64> = [
             ("singlelongtokenwithoutcasechange", 2),
             ("singleLongTokenWithCamelCaseChange", 2),
             ("Longsingletokenwithpunctu@t!onwithin", 2),
@@ -791,7 +790,7 @@ mod tests {
             ("GPT-2", 2),
         ]
         .iter()
-        .map(|(key, value)| (key.to_string(), *value))
+        .map(|(key, value)| (CompactString::from(key.to_string()), *value))
         .collect();
         let trainer = BpeTrainer::builder()
             .max_token_length(Some(max_token_length))
@@ -816,7 +815,7 @@ mod tests {
         // directly compares tokens with known expected values.
         // maybe unstable depending on specific settings or changes.
          */
-        let long_word_counts: AHashMap<String, u64> = [
+        let long_word_counts: AHashMap<CompactString, u64> = [
             ("sin", 2),
             ("Sin", 2),
             ("Lon", 2),
@@ -831,7 +830,7 @@ mod tests {
             ("GP", 2),
         ]
         .iter()
-        .map(|(key, value)| (key.to_string(), *value))
+        .map(|(key, value)| (CompactString::from(key.to_string()), *value))
         .collect();
         let trainer = BpeTrainer::builder()
             .max_token_length(Some(2))
