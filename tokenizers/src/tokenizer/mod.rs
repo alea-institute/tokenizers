@@ -9,8 +9,8 @@
 //!   - [`PostProcessor`](trait.PostProcessor.html): Takes care of the processing after tokenization (like truncating, padding,
 //!     ...).
 
+use ahash::AHashMap;
 use std::{
-    collections::HashMap,
     fs::{read_to_string, File},
     io::prelude::*,
     io::BufReader,
@@ -78,7 +78,7 @@ pub trait Model {
     /// Find the string token associated to an ID
     fn id_to_token(&self, id: u32) -> Option<String>;
     /// Retrieve the entire vocabulary mapping (token -> ID)
-    fn get_vocab(&self) -> HashMap<String, u32>;
+    fn get_vocab(&self) -> AHashMap<String, u32>;
     /// Retrieve the size of the vocabulary
     fn get_vocab_size(&self) -> usize;
     /// Save the current `Model` in the given folder, using the given `prefix` for the various
@@ -659,7 +659,7 @@ where
     }
 
     /// Get the vocabulary
-    pub fn get_vocab(&self, with_added_tokens: bool) -> HashMap<String, u32> {
+    pub fn get_vocab(&self, with_added_tokens: bool) -> AHashMap<String, u32> {
         let mut final_vocab = self.model.get_vocab();
 
         if with_added_tokens {
@@ -676,7 +676,7 @@ where
     }
 
     /// Get the added tokens decoder
-    pub fn get_added_tokens_decoder(&self) -> HashMap<u32, AddedToken> {
+    pub fn get_added_tokens_decoder(&self) -> AHashMap<u32, AddedToken> {
         self.added_vocabulary.get_added_tokens_decoder().clone()
     }
 
@@ -703,7 +703,7 @@ where
             .or_else(|| self.model.id_to_token(id))
     }
 
-    /// set the added bocab's splitting scheme
+    /// set the added vocab's splitting scheme
     pub fn set_encode_special_tokens(&mut self, value: bool) {
         self.added_vocabulary.set_encode_special_tokens(value);
     }
