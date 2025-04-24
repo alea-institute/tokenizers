@@ -184,19 +184,15 @@ macro_rules! setter {
 ///         highly repetitive tokens like `======` for wikipedia
 /// 
 ///     prune_min_frequency (:obj:`int`, `optional`):
-///         Minimum frequency for a pair to be considered during pruning.
+///         Minimum frequency for words and pairs to be kept during training.
 ///         Higher values = more memory efficient training.
 ///         
 ///     prune_word_interval (:obj:`int`, `optional`):
 ///         Number of words to process between pruning operations.
 ///         Lower values = more memory efficient training but potentially slower.
 ///         
-///     prune_step_interval (:obj:`int`, `optional`):
-///         Number of merge steps to perform between pruning operations.
-///         Lower values = more memory efficient training but potentially slower.
-///         
 ///     prune_keep_percent (:obj:`float`, `optional`):
-///         Percentage of most frequent pairs to keep during pruning.
+///         Percentage of most frequent words and pairs to keep during pruning.
 ///         Value between 0.0 and 1.0. Lower values = more memory efficient.
 ///
 #[pyclass(extends=PyTrainer, module = "tokenizers.trainers", name = "BpeTrainer")]
@@ -407,7 +403,7 @@ impl PyBpeTrainer {
     #[new]
     #[pyo3(
         signature = (**kwargs),
-        text_signature = "(self, vocab_size=30000, min_frequency=0, show_progress=True, special_tokens=[], limit_alphabet=None, initial_alphabet=[], continuing_subword_prefix=None, end_of_word_suffix=None, max_token_length=None, prune_min_frequency=None, prune_word_interval=None, prune_step_interval=None, prune_keep_percent=None)"
+        text_signature = "(self, vocab_size=30000, min_frequency=0, show_progress=True, special_tokens=[], limit_alphabet=None, initial_alphabet=[], continuing_subword_prefix=None, end_of_word_suffix=None, max_token_length=None, prune_min_frequency=None, prune_word_interval=None, prune_keep_percent=None)"
     )]
     pub fn new(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<(Self, PyTrainer)> {
         let mut builder = tk::models::bpe::BpeTrainer::builder();
@@ -456,7 +452,8 @@ impl PyBpeTrainer {
                     "end_of_word_suffix" => builder = builder.end_of_word_suffix(val.extract()?),
                     "prune_min_frequency" => builder = builder.prune_min_frequency(val.extract()?),
                     "prune_word_interval" => builder = builder.prune_word_interval(val.extract()?),
-                    "prune_step_interval" => builder = builder.prune_step_interval(val.extract()?),
+                    // No longer using step_interval for pruning
+                    "prune_step_interval" => println!("prune_step_interval is deprecated and will be ignored"),
                     "prune_keep_percent" => builder = builder.prune_keep_percent(val.extract()?),
                     _ => println!("Ignored unknown kwargs option {}", key),
                 };
