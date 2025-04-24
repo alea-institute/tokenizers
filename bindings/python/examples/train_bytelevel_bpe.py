@@ -33,13 +33,18 @@ if not files:
 # Initialize an empty tokenizer
 tokenizer = ByteLevelBPETokenizer(add_prefix_space=True)
 
-# And then train
+# And then train with memory optimization
 tokenizer.train(
     files,
     vocab_size=10000,
     min_frequency=2,
     show_progress=True,
     special_tokens=["<s>", "<pad>", "</s>"],
+    # Memory optimization parameters
+    prune_min_frequency=3,         # Remove pairs with frequency < 3
+    prune_word_interval=5000,      # Prune after processing every 5k words
+    prune_step_interval=2000,      # Prune after every 2000 merge steps
+    prune_keep_percent=0.9,        # Keep only top 90% most frequent pairs
 )
 
 # Save the files

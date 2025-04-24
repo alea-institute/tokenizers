@@ -44,7 +44,39 @@ class BpeTrainer(Trainer):
             This can help with reducing polluting your vocabulary with
             highly repetitive tokens like `======` for wikipedia
 
+        prune_min_frequency (:obj:`int`, `optional`):
+            Minimum frequency for a pair to be considered during pruning.
+            Higher values = more memory efficient training.
+            
+        prune_word_interval (:obj:`int`, `optional`):
+            Number of words to process between pruning operations.
+            Lower values = more memory efficient training but potentially slower.
+            
+        prune_step_interval (:obj:`int`, `optional`):
+            Number of merge steps to perform between pruning operations.
+            Lower values = more memory efficient training but potentially slower.
+            
+        prune_keep_percent (:obj:`float`, `optional`):
+            Percentage of most frequent pairs to keep during pruning.
+            Value between 0.0 and 1.0. Lower values = more memory efficient.
     """
+    def __init__(
+        self,
+        vocab_size=30000,
+        min_frequency=0,
+        show_progress=True,
+        special_tokens=[],
+        limit_alphabet=None,
+        initial_alphabet=[],
+        continuing_subword_prefix=None,
+        end_of_word_suffix=None,
+        max_token_length=None,
+        prune_min_frequency=None,
+        prune_word_interval=None,
+        prune_step_interval=None,
+        prune_keep_percent=None,
+    ):
+        pass
 
 class UnigramTrainer(Trainer):
     """

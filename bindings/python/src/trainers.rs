@@ -182,6 +182,22 @@ macro_rules! setter {
 ///         Prevents creating tokens longer than the specified size.
 ///         This can help with reducing polluting your vocabulary with
 ///         highly repetitive tokens like `======` for wikipedia
+/// 
+///     prune_min_frequency (:obj:`int`, `optional`):
+///         Minimum frequency for a pair to be considered during pruning.
+///         Higher values = more memory efficient training.
+///         
+///     prune_word_interval (:obj:`int`, `optional`):
+///         Number of words to process between pruning operations.
+///         Lower values = more memory efficient training but potentially slower.
+///         
+///     prune_step_interval (:obj:`int`, `optional`):
+///         Number of merge steps to perform between pruning operations.
+///         Lower values = more memory efficient training but potentially slower.
+///         
+///     prune_keep_percent (:obj:`float`, `optional`):
+///         Percentage of most frequent pairs to keep during pruning.
+///         Value between 0.0 and 1.0. Lower values = more memory efficient.
 ///
 #[pyclass(extends=PyTrainer, module = "tokenizers.trainers", name = "BpeTrainer")]
 pub struct PyBpeTrainer {}
@@ -273,6 +289,81 @@ impl PyBpeTrainer {
     fn set_max_token_length(self_: PyRef<Self>, limit: Option<usize>) {
         setter!(self_, BpeTrainer, max_token_length, limit);
     }
+    
+    #[getter]
+    fn get_prune_min_frequency(self_: PyRef<Self>) -> Option<u64> {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(trainer) = &*super_.trainer.read().unwrap() {
+            trainer.pruning.min_frequency
+        } else {
+            unreachable!()
+        }
+    }
+
+    #[setter]
+    fn set_prune_min_frequency(self_: PyRef<Self>, frequency: Option<u64>) {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(ref mut trainer) = *super_.trainer.write().unwrap() {
+            trainer.pruning.min_frequency = frequency;
+        }
+    }
+    
+    #[getter]
+    fn get_prune_word_interval(self_: PyRef<Self>) -> Option<usize> {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(trainer) = &*super_.trainer.read().unwrap() {
+            trainer.pruning.word_interval
+        } else {
+            unreachable!()
+        }
+    }
+
+    #[setter]
+    fn set_prune_word_interval(self_: PyRef<Self>, interval: Option<usize>) {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(ref mut trainer) = *super_.trainer.write().unwrap() {
+            trainer.pruning.word_interval = interval;
+        }
+    }
+    
+    #[getter]
+    fn get_prune_step_interval(self_: PyRef<Self>) -> Option<usize> {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(trainer) = &*super_.trainer.read().unwrap() {
+            trainer.pruning.step_interval
+        } else {
+            unreachable!()
+        }
+    }
+
+    #[setter]
+    fn set_prune_step_interval(self_: PyRef<Self>, interval: Option<usize>) {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(ref mut trainer) = *super_.trainer.write().unwrap() {
+            trainer.pruning.step_interval = interval;
+        }
+    }
+    
+    #[getter]
+    fn get_prune_keep_percent(self_: PyRef<Self>) -> Option<f32> {
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(trainer) = &*super_.trainer.read().unwrap() {
+            trainer.pruning.keep_percent
+        } else {
+            unreachable!()
+        }
+    }
+
+    #[setter]
+    fn set_prune_keep_percent(self_: PyRef<Self>, percent: Option<f32>) {
+        if let Some(p) = percent {
+            assert!(p > 0.0 && p <= 1.0, "Percentage must be between 0 and 1");
+        }
+        let super_ = self_.as_ref();
+        if let TrainerWrapper::BpeTrainer(ref mut trainer) = *super_.trainer.write().unwrap() {
+            trainer.pruning.keep_percent = percent;
+        }
+    }
 
     #[getter]
     fn get_initial_alphabet(self_: PyRef<Self>) -> Vec<String> {
@@ -314,7 +405,10 @@ impl PyBpeTrainer {
     }
 
     #[new]
-    #[pyo3(signature = (**kwargs), text_signature = None)]
+    #[pyo3(
+        signature = (**kwargs),
+        text_signature = "(self, vocab_size=30000, min_frequency=0, show_progress=True, special_tokens=[], limit_alphabet=None, initial_alphabet=[], continuing_subword_prefix=None, end_of_word_suffix=None, max_token_length=None, prune_min_frequency=None, prune_word_interval=None, prune_step_interval=None, prune_keep_percent=None)"
+    )]
     pub fn new(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<(Self, PyTrainer)> {
         let mut builder = tk::models::bpe::BpeTrainer::builder();
         if let Some(kwargs) = kwargs {
@@ -360,6 +454,10 @@ impl PyBpeTrainer {
                         builder = builder.continuing_subword_prefix(val.extract()?)
                     }
                     "end_of_word_suffix" => builder = builder.end_of_word_suffix(val.extract()?),
+                    "prune_min_frequency" => builder = builder.prune_min_frequency(val.extract()?),
+                    "prune_word_interval" => builder = builder.prune_word_interval(val.extract()?),
+                    "prune_step_interval" => builder = builder.prune_step_interval(val.extract()?),
+                    "prune_keep_percent" => builder = builder.prune_keep_percent(val.extract()?),
                     _ => println!("Ignored unknown kwargs option {}", key),
                 };
             }
@@ -520,7 +618,7 @@ impl PyWordPieceTrainer {
     #[new]
     #[pyo3(
         signature = (** kwargs),
-        text_signature = "(self, vocab_size=30000, min_frequency=0, show_progress=True, special_tokens=[], limit_alphabet=None, initial_alphabet= [],continuing_subword_prefix=\"##\", end_of_word_suffix=None)"
+        text_signature = "(self, vocab_size=30000, min_frequency=0, show_progress=True, special_tokens=[], limit_alphabet=None, initial_alphabet= [], continuing_subword_prefix=\"##\", end_of_word_suffix=None)"
     )]
     pub fn new(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<(Self, PyTrainer)> {
         let mut builder = tk::models::wordpiece::WordPieceTrainer::builder();
@@ -566,6 +664,10 @@ impl PyWordPieceTrainer {
                         builder = builder.continuing_subword_prefix(val.extract()?)
                     }
                     "end_of_word_suffix" => builder = builder.end_of_word_suffix(val.extract()?),
+                    // Ignoring pruning parameters for WordPieceTrainer as they're only for BpeTrainer
+                    "prune_min_frequency" | "prune_word_interval" | "prune_step_interval" | "prune_keep_percent" => {
+                        println!("Ignored pruning parameter {} (only applies to BpeTrainer)", key)
+                    }
                     _ => println!("Ignored unknown kwargs option {}", key),
                 };
             }

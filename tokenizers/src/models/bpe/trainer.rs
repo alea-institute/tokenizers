@@ -7,6 +7,7 @@ use crate::utils::progress::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 
 #[derive(Debug, Eq)]
 struct Merge {
@@ -35,6 +36,70 @@ impl Ord for Merge {
     }
 }
 
+/// Configuration for BPE pair pruning to optimize memory usage
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PruningConfig {
+    /// Minimum frequency threshold for pairs to survive pruning
+    pub min_frequency: Option<u64>,
+    /// Controls how many words to process before applying pruning
+    pub word_interval: Option<usize>,
+    /// Controls how many merge steps to perform before applying pruning
+    pub step_interval: Option<usize>,
+    /// If set, keep only this percentage of pairs (e.g. 0.8 = keep top 80%)
+    pub keep_percent: Option<f32>,
+}
+
+impl PruningConfig {
+    /// Create a new empty pruning configuration
+    pub fn new() -> Self {
+        Self {
+            min_frequency: None,
+            word_interval: None,
+            step_interval: None,
+            keep_percent: None,
+        }
+    }
+
+    /// Set minimum frequency threshold for pruning
+    pub fn min_frequency(mut self, threshold: u64) -> Self {
+        self.min_frequency = Some(threshold);
+        self
+    }
+
+    /// Set word count interval for pruning
+    pub fn word_interval(mut self, interval: usize) -> Self {
+        self.word_interval = Some(interval);
+        self
+    }
+
+    /// Set step interval for pruning
+    pub fn step_interval(mut self, interval: usize) -> Self {
+        self.step_interval = Some(interval);
+        self
+    }
+
+    /// Set percentage of pairs to keep during pruning
+    pub fn keep_percent(mut self, percent: f32) -> Self {
+        assert!(percent > 0.0 && percent <= 1.0, "Percentage must be between 0 and 1");
+        self.keep_percent = Some(percent);
+        self
+    }
+
+    /// Returns true if any pruning is configured
+    pub fn is_enabled(&self) -> bool {
+        self.min_frequency.is_some() || 
+        self.word_interval.is_some() || 
+        self.step_interval.is_some() || 
+        self.keep_percent.is_some()
+    }
+}
+
+impl Default for PruningConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 struct Config {
     min_frequency: u64,
     vocab_size: usize,
@@ -45,6 +110,7 @@ struct Config {
     continuing_subword_prefix: Option<String>,
     end_of_word_suffix: Option<String>,
     max_token_length: Option<usize>,
+    pruning: PruningConfig,
 }
 
 /// A `BpeTrainerBuilder` can be used to create a `BpeTrainer` with a custom
@@ -66,6 +132,7 @@ impl Default for BpeTrainerBuilder {
                 continuing_subword_prefix: None,
                 end_of_word_suffix: None,
                 max_token_length: None,
+                pruning: PruningConfig::default(),
             },
         }
     }
@@ -139,6 +206,42 @@ impl BpeTrainerBuilder {
         self
     }
 
+    /// Set pruning configuration for memory optimization
+    #[must_use]
+    pub fn pruning(mut self, config: PruningConfig) -> Self {
+        self.config.pruning = config;
+        self
+    }
+
+    /// Set pruning min frequency threshold
+    #[must_use]
+    pub fn prune_min_frequency(mut self, threshold: u64) -> Self {
+        self.config.pruning.min_frequency = Some(threshold);
+        self
+    }
+
+    /// Set pruning word count interval
+    #[must_use]
+    pub fn prune_word_interval(mut self, interval: usize) -> Self {
+        self.config.pruning.word_interval = Some(interval);
+        self
+    }
+
+    /// Set pruning step interval
+    #[must_use]
+    pub fn prune_step_interval(mut self, interval: usize) -> Self {
+        self.config.pruning.step_interval = Some(interval);
+        self
+    }
+
+    /// Set pruning top percentage to keep
+    #[must_use]
+    pub fn prune_keep_percent(mut self, percent: f32) -> Self {
+        assert!(percent > 0.0 && percent <= 1.0, "Percentage must be between 0 and 1");
+        self.config.pruning.keep_percent = Some(percent);
+        self
+    }
+
     /// Constructs the final BpeTrainer
     pub fn build(self) -> BpeTrainer {
         BpeTrainer {
@@ -151,6 +254,7 @@ impl BpeTrainerBuilder {
             continuing_subword_prefix: self.config.continuing_subword_prefix,
             end_of_word_suffix: self.config.end_of_word_suffix,
             max_token_length: self.config.max_token_length,
+            pruning: self.config.pruning,
             words: HashMap::new(),
         }
     }
@@ -158,8 +262,19 @@ impl BpeTrainerBuilder {
 
 /// In charge of training a `BPE` model
 ///
+/// # Memory Optimization
+///
+/// The BPE training process can be memory-intensive for large datasets. This trainer provides
+/// several configuration options to reduce memory usage:
+///
+/// - `prune_min_frequency`: Filter out pairs below this frequency during training
+/// - `prune_word_interval`: Apply pruning after processing this many words  
+/// - `prune_step_interval`: Apply pruning after this many merge steps
+/// - `prune_keep_percent`: Keep only the top X% most frequent pairs when pruning
+///
 /// # Examples
 ///
+/// Basic usage:
 /// ```
 /// use tokenizers::tokenizer::Trainer;
 /// use tokenizers::models::bpe::{BPE, BpeTrainer};
@@ -172,8 +287,23 @@ impl BpeTrainerBuilder {
 /// let mut model = BPE::default();
 /// let special_tokens = trainer.train(&mut model).unwrap();
 /// ```
+///
+/// With memory optimization:
+/// ```
+/// use tokenizers::tokenizer::Trainer;
+/// use tokenizers::models::bpe::{BPE, BpeTrainer};
+///
+/// // Create a memory-optimized trainer with pruning configuration
+/// let mut trainer = BpeTrainer::builder()
+///     .vocab_size(30000)
+///     .prune_min_frequency(3) // Remove pairs with frequency < 3
+///     .prune_word_interval(10000) // Prune after processing every 10k words
+///     .prune_step_interval(1000) // Prune after every 1000 merge steps
+///     .prune_keep_percent(0.8) // Keep only top 80% most frequent pairs
+///     .build();
+/// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BpeTrainer {
     /// The minimum frequency a pair must have to produce a merge operation
     pub min_frequency: u64,
@@ -186,14 +316,16 @@ pub struct BpeTrainer {
     /// Whether to limit the number of initial tokens that can be kept before computing merges
     pub limit_alphabet: Option<usize>,
     /// The initial alphabet we want absolutely to include. This allows to cover
-    /// some characters that are not necessarily in the training set
+    /// some characters that are not necessarily in the training dataset
     pub initial_alphabet: HashSet<char>,
     /// An optional prefix to use on any subword that exist only behind another one
     pub continuing_subword_prefix: Option<String>,
-    /// An optional suffix to caracterize and end-of-word subword
+    /// An optional suffix to characterize an end-of-word subword
     pub end_of_word_suffix: Option<String>,
     /// An optional parameter to limit the max length of any single token
     pub max_token_length: Option<usize>,
+    /// Configuration for memory optimization through pair pruning
+    pub pruning: PruningConfig,
 
     words: HashMap<String, u64>,
 }
@@ -319,6 +451,73 @@ impl BpeTrainer {
         });
     }
 
+    /// Prune pair_counts and where_to_update based on configured thresholds
+    fn prune_pairs(
+        &self,
+        pair_counts: &mut HashMap<Pair, i32>,
+        where_to_update: &mut HashMap<Pair, HashSet<usize>>,
+        p: &Option<ProgressBar>,
+    ) {
+        // Skip if no pruning is configured
+        if !self.pruning.is_enabled() {
+            return;
+        }
+        
+        if let Some(p) = p {
+            p.set_message("Pruning pairs");
+        }
+        
+        // Apply frequency threshold pruning
+        if let Some(threshold) = self.pruning.min_frequency {
+            let pairs_to_remove: Vec<Pair> = pair_counts
+                .iter()
+                .filter(|(_, &count)| (count as u64) < threshold)
+                .map(|(&pair, _)| pair)
+                .collect();
+                
+            for pair in &pairs_to_remove {
+                pair_counts.remove(pair);
+                where_to_update.remove(pair);
+            }
+            
+            if let Some(p) = p {
+                p.set_message(format!("Pruned {} pairs by frequency", pairs_to_remove.len()));
+            }
+        }
+        
+        // Apply percentage-based pruning if needed
+        if let Some(keep_percent) = self.pruning.keep_percent {
+            if !pair_counts.is_empty() {
+                // Sort pairs by frequency (highest first)
+                let mut pairs: Vec<(Pair, i32)> = pair_counts.iter().map(|(&k, &v)| (k, v)).collect();
+                pairs.sort_by(|a, b| b.1.cmp(&a.1));
+                
+                // Calculate how many to keep
+                let keep_count = (pairs.len() as f32 * keep_percent).ceil() as usize;
+                let keep_count = keep_count.max(1); // Always keep at least one
+                
+                if keep_count < pairs.len() {
+                    // Create a set of pairs to keep
+                    let pairs_to_keep: HashSet<Pair> = pairs
+                        .into_iter()
+                        .take(keep_count)
+                        .map(|(pair, _)| pair)
+                        .collect();
+                    
+                    // Remove pairs not in the keep set
+                    let initial_len = pair_counts.len();
+                    pair_counts.retain(|&pair, _| pairs_to_keep.contains(&pair));
+                    where_to_update.retain(|&pair, _| pairs_to_keep.contains(&pair));
+                    
+                    if let Some(p) = p {
+                        p.set_message(format!("Pruned {} pairs by percent (kept top {}%)", 
+                            initial_len - pair_counts.len(), keep_percent * 100.0));
+                    }
+                }
+            }
+        }
+    }
+
     /// Tokenize words and add subwords to the vocabulary when relevant
     fn tokenize_words(
         &self,
@@ -376,7 +575,14 @@ impl BpeTrainer {
         counts: &[u64],
         p: &Option<ProgressBar>,
     ) -> (HashMap<Pair, i32>, HashMap<Pair, HashSet<usize>>) {
-        words
+        // Track pruning interval if configured
+        let word_count_interval = self.pruning.word_interval;
+        
+        // Create atomic variables to track processing and pruning state
+        let words_processed = AtomicUsize::new(0);
+        let should_prune = AtomicBool::new(false);
+        
+        let result = words
             .maybe_par_iter()
             .enumerate()
             .map(|(i, word)| {
@@ -409,24 +615,62 @@ impl BpeTrainer {
                 if let Some(p) = &p {
                     p.inc(1);
                 }
+                
+                // Check if we've processed enough words for pruning
+                if let Some(interval) = word_count_interval {
+                    let new_count = words_processed.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+                    if new_count % interval == 0 {
+                        should_prune.store(true, AtomicOrdering::SeqCst);
+                    }
+                }
 
                 (pair_counts, where_to_update)
             })
             .reduce(
                 || (HashMap::new(), HashMap::new()),
                 |(mut pair_counts, mut where_to_update), (pc, wtu)| {
-                    for (k, v) in pc {
-                        pair_counts.entry(k).and_modify(|c| *c += v).or_insert(v);
+                    // Apply early frequency threshold pruning if configured
+                    if let Some(threshold) = self.pruning.min_frequency {
+                        // Only accumulate pairs that meet the threshold
+                        for (k, v) in pc {
+                            if v as u64 >= threshold {
+                                pair_counts.entry(k).and_modify(|c| *c += v).or_insert(v);
+                            }
+                        }
+                        
+                        // Only track positions for pairs we're keeping
+                        for (k, v) in wtu {
+                            if pair_counts.contains_key(&k) {
+                                where_to_update
+                                    .entry(k)
+                                    .and_modify(|set| *set = set.union(&v).copied().collect())
+                                    .or_insert(v);
+                            }
+                        }
+                    } else {
+                        // Standard accumulation without pruning
+                        for (k, v) in pc {
+                            pair_counts.entry(k).and_modify(|c| *c += v).or_insert(v);
+                        }
+                        for (k, v) in wtu {
+                            where_to_update
+                                .entry(k)
+                                .and_modify(|set| *set = set.union(&v).copied().collect())
+                                .or_insert(v);
+                        }
                     }
-                    for (k, v) in wtu {
-                        where_to_update
-                            .entry(k)
-                            .and_modify(|set| *set = set.union(&v).copied().collect())
-                            .or_insert(v);
-                    }
+                    
                     (pair_counts, where_to_update)
                 },
-            )
+            );
+            
+        // Apply pruning after reduction if necessary
+        let (mut pair_counts, mut where_to_update) = result;
+        if should_prune.load(AtomicOrdering::SeqCst) {
+            self.prune_pairs(&mut pair_counts, &mut where_to_update, p);
+        }
+        
+        (pair_counts, where_to_update)
     }
 
     pub fn do_train(
@@ -482,6 +726,11 @@ impl BpeTrainer {
         //
         self.update_progress(&progress, self.vocab_size, "Compute merges");
         let mut merges: Vec<(Pair, u32)> = vec![];
+        
+        // For step-based pruning
+        let step_interval = self.pruning.step_interval;
+        let mut steps_since_prune = 0;
+        
         loop {
             // Stop as soon as we have a big enough vocabulary
             if word_to_id.len() >= self.vocab_size {
@@ -502,6 +751,9 @@ impl BpeTrainer {
             if top.count < 1 || self.min_frequency > top.count {
                 break;
             }
+            
+            // Track steps for pruning
+            steps_since_prune += 1;
 
             let part_a = &id_to_word[top.pair.0 as usize];
             let mut part_b = id_to_word[top.pair.1 as usize].to_owned();
@@ -514,10 +766,15 @@ impl BpeTrainer {
                 }
             }
             let new_token = format!("{part_a}{part_b}");
-            // implement sentencepiece-like merge.
-            // if this code were to be merged, integrate a way in the python bindings to communicate this variable
-            // default should be 0/None to maintain previous behavior. 16 is the spm default.
-
+            
+            // Check max token length
+            if let Some(max_length) = self.max_token_length {
+                if new_token.chars().count() > max_length {
+                    // Skip this merge as the resulting token would be too long
+                    continue;
+                }
+            }
+            
             // Insert new token if it does not already exist
             let new_token_id = word_to_id
                 .get(&new_token)
@@ -583,6 +840,15 @@ impl BpeTrainer {
                         });
                 }
             }
+            
+            // Apply step-interval pruning if configured
+            if let Some(interval) = step_interval {
+                if steps_since_prune >= interval {
+                    self.prune_pairs(&mut pair_counts, &mut where_to_update, &progress);
+                    steps_since_prune = 0;
+                }
+            }
+            
             where_to_update.drain().for_each(|(pair, pos)| {
                 let count = pair_counts[&pair];
                 if count > 0 {
@@ -675,8 +941,33 @@ impl Trainer for BpeTrainer {
 
 #[cfg(test)]
 mod tests {
-    use super::{BpeTrainer, Pair, BPE};
+    use super::{BpeTrainer, Pair, PruningConfig, BPE};
     use std::collections::HashMap;
+
+    #[test]
+    fn test_pruning_config() {
+        // Test builder pattern
+        let builder_trainer = BpeTrainer::builder()
+            .prune_min_frequency(5)
+            .prune_word_interval(1000)
+            .prune_step_interval(500)
+            .prune_keep_percent(0.9)
+            .build();
+        assert_eq!(builder_trainer.pruning.min_frequency, Some(5));
+        assert_eq!(builder_trainer.pruning.word_interval, Some(1000));
+        assert_eq!(builder_trainer.pruning.step_interval, Some(500));
+        assert_eq!(builder_trainer.pruning.keep_percent, Some(0.9));
+        
+        // Test direct pruning config
+        let config = PruningConfig::new()
+            .min_frequency(10)
+            .keep_percent(0.8);
+        let config_trainer = BpeTrainer::builder()
+            .pruning(config)
+            .build();
+        assert_eq!(config_trainer.pruning.min_frequency, Some(10));
+        assert_eq!(config_trainer.pruning.keep_percent, Some(0.8));
+    }
 
     #[test]
     fn test_train() {
