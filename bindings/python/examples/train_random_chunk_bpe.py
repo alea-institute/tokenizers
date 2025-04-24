@@ -30,6 +30,7 @@ parser.add_argument("--min-length", default=2, type=int, help="Minimum length of
 parser.add_argument("--max-length", default=5, type=int, help="Maximum length of chunks")
 parser.add_argument("--vocab-size", default=10000, type=int, help="Size of vocabulary")
 parser.add_argument("--min-frequency", default=2, type=int, help="Minimum frequency for a token to be included")
+parser.add_argument("--even-only", action="store_true", help="Only use even-length chunks")
 args = parser.parse_args()
 
 files = glob.glob(args.files)
@@ -42,7 +43,14 @@ if not files:
 tokenizer = Tokenizer(BPE())
 
 # Use RandomChunkSplit as pre-tokenizer
-tokenizer.pre_tokenizer = RandomChunkSplit(min_length=args.min_length, max_length=args.max_length)
+pre_tokenizer = RandomChunkSplit(min_length=args.min_length, max_length=args.max_length)
+
+# Enable even_only mode if requested
+if args.even_only:
+    pre_tokenizer = pre_tokenizer.with_even_only(True)
+    print(f"Even-only mode enabled, adjusted min_length={pre_tokenizer.min_length}, max_length={pre_tokenizer.max_length}")
+
+tokenizer.pre_tokenizer = pre_tokenizer
 
 # Optional: Add NFKC normalization like SentencePieceBPE
 tokenizer.normalizer = normalizers.NFKC()
@@ -56,7 +64,10 @@ trainer = trainers.BpeTrainer(
 )
 
 # Train the model
-print(f"Training BPE with RandomChunkSplit (min_length={args.min_length}, max_length={args.max_length})")
+chunk_description = f"min_length={pre_tokenizer.min_length}, max_length={pre_tokenizer.max_length}"
+if args.even_only:
+    chunk_description += ", even_only=True"
+print(f"Training BPE with RandomChunkSplit ({chunk_description})")
 tokenizer.train(files, trainer)
 
 # Save the trained tokenizer

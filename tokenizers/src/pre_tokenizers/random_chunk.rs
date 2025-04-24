@@ -17,6 +17,9 @@ pub struct RandomChunkSplit {
     /// When true, uses deterministic behavior instead of random chunks (for inference)
     #[serde(default)]
     pub deterministic: bool,
+    /// When true, ensures all chunk lengths are even numbers
+    #[serde(default)]
+    pub even_only: bool,
 }
 
 impl RandomChunkSplit {
@@ -30,6 +33,7 @@ impl RandomChunkSplit {
             min_length,
             max_length,
             deterministic: false,
+            even_only: false,
         }
     }
     
@@ -42,6 +46,25 @@ impl RandomChunkSplit {
         self.deterministic = deterministic;
         self
     }
+    
+    /// Sets the even_only mode
+    ///
+    /// When even_only is true, only even-length chunks will be created.
+    /// Both min_length and max_length will be adjusted to be even numbers.
+    pub fn with_even_only(mut self, even_only: bool) -> Self {
+        self.even_only = even_only;
+        
+        if even_only {
+            // Ensure min_length and max_length are even numbers
+            self.min_length = if self.min_length % 2 == 1 { self.min_length + 1 } else { self.min_length };
+            self.max_length = if self.max_length % 2 == 1 { self.max_length - 1 } else { self.max_length };
+            
+            // Ensure max is at least min
+            self.max_length = self.max_length.max(self.min_length);
+        }
+        
+        self
+    }
 }
 
 /// Split pattern that creates chunks of random or fixed lengths
@@ -49,16 +72,18 @@ struct RandomChunkPattern<'a> {
     min_length: usize,
     max_length: usize,
     deterministic: bool,
+    even_only: bool,
     chars: &'a [char],
     current_pos: usize,
 }
 
 impl<'a> RandomChunkPattern<'a> {
-    fn new(chars: &'a [char], min_length: usize, max_length: usize, deterministic: bool) -> Self {
+    fn new(chars: &'a [char], min_length: usize, max_length: usize, deterministic: bool, even_only: bool) -> Self {
         Self {
             min_length,
             max_length,
             deterministic,
+            even_only,
             chars,
             current_pos: 0,
         }
@@ -96,19 +121,53 @@ impl<'a> Pattern for RandomChunkPattern<'a> {
                 break;
             }
             
-            // Choose chunk length based on deterministic mode
+            // Choose chunk length based on deterministic mode and even_only setting
             let chunk_len = if self.deterministic {
                 // In deterministic mode, use a consistent length
                 // For inference, we use the average of min and max length for consistency
                 // This gives a predictable behavior while still allowing multi-word tokens
                 let avg_length = (self.min_length + self.max_length) / 2;
-                avg_length.min(effective_max)
+                let length = avg_length.min(effective_max);
+                
+                // If even_only is set, ensure the length is even
+                if self.even_only && length % 2 == 1 {
+                    // Round down unless it would go below min_length
+                    if length - 1 >= self.min_length {
+                        length - 1
+                    } else {
+                        // This should not happen if min_length is properly adjusted
+                        // but just in case, round up
+                        length + 1
+                    }
+                } else {
+                    length
+                }
             } else if self.min_length == effective_max {
                 self.min_length
             } else {
                 // In random mode, generate a random length
                 let mut rng = rand::thread_rng();
-                rng.gen_range(self.min_length..=effective_max)
+                
+                if self.even_only {
+                    // For even_only, generate random even numbers by:
+                    // 1. Halve the min and max
+                    // 2. Generate a random number in that range
+                    // 3. Double the result to get an even number
+                    
+                    // min and max should already be even numbers if even_only is true
+                    let half_min = self.min_length / 2;
+                    let half_max = effective_max / 2;
+                    
+                    if half_min == half_max {
+                        self.min_length
+                    } else {
+                        let half_rand = rng.gen_range(half_min..=half_max);
+                        half_rand * 2
+                    }
+                } else {
+                    // Standard random generation
+                    rng.gen_range(self.min_length..=effective_max)
+                }
             };
             
             // Calculate byte length of this chunk
@@ -132,9 +191,10 @@ impl<'a> Pattern for RandomChunkPattern<'a> {
 impl PreTokenizer for RandomChunkSplit {
     fn pre_tokenize(&self, pretokenized: &mut PreTokenizedString) -> Result<()> {
         let deterministic = self.deterministic;
+        let even_only = self.even_only;
         pretokenized.split(|_, normalized| {
             let chars: Vec<char> = normalized.get().chars().collect();
-            let pattern = RandomChunkPattern::new(&chars, self.min_length, self.max_length, deterministic);
+            let pattern = RandomChunkPattern::new(&chars, self.min_length, self.max_length, deterministic, even_only);
             normalized.split(pattern, SplitDelimiterBehavior::Isolated)
         })
     }
@@ -275,6 +335,94 @@ mod tests {
         let avg_length = (deterministic_pretok.min_length + deterministic_pretok.max_length) / 2;
         for (chunk, _) in splits1.iter().take(splits1.len() - 1) {  // Skip the last chunk
             let chunk_chars = chunk.chars().count();
+            assert_eq!(chunk_chars, avg_length);
+        }
+    }
+    
+    #[test]
+    fn test_even_only_mode() {
+        // Test with even_only mode enabled
+        let s = "The quick brown fox jumps over the lazy dog.";
+        
+        // Create a pre-tokenizer with even_only mode enabled
+        let even_only_pretok = RandomChunkSplit::new(3, 6).with_even_only(true);
+        
+        // Check that min and max are adjusted to be even numbers
+        assert_eq!(even_only_pretok.min_length, 4);  // 3 rounded up to 4
+        assert_eq!(even_only_pretok.max_length, 6);  // 6 stays the same
+        
+        // Test tokenization
+        let mut pretokenized = PreTokenizedString::from(s);
+        even_only_pretok.pre_tokenize(&mut pretokenized).unwrap();
+        
+        let splits = pretokenized
+            .get_splits(OffsetReferential::Original, OffsetType::Byte)
+            .into_iter()
+            .map(|(s, o, _)| (s, o))
+            .collect::<Vec<_>>();
+            
+        // Ensure all characters are accounted for
+        let joined: String = splits.iter().map(|(s, _)| s.to_string()).collect();
+        assert_eq!(joined, s);
+        
+        // Verify that each chunk has an even length
+        for (chunk, _) in &splits {
+            let chunk_chars = chunk.chars().count();
+            
+            // The last chunk might not be even if there aren't enough characters left
+            if chunk_chars < even_only_pretok.max_length {
+                continue;
+            }
+            
+            assert_eq!(chunk_chars % 2, 0, "Chunk '{}' has odd length {}", chunk, chunk_chars);
+            assert!(chunk_chars >= even_only_pretok.min_length && chunk_chars <= even_only_pretok.max_length);
+        }
+    }
+    
+    #[test]
+    fn test_even_only_with_deterministic() {
+        // Test with both even_only and deterministic modes enabled
+        let s = "The quick brown fox jumps over the lazy dog.";
+        
+        // Create a pre-tokenizer with both even_only and deterministic modes
+        let pretok = RandomChunkSplit::new(3, 7)
+            .with_even_only(true)
+            .with_deterministic(true);
+        
+        // Check that min and max are adjusted to be even numbers
+        assert_eq!(pretok.min_length, 4);   // 3 rounded up to 4
+        assert_eq!(pretok.max_length, 8);   // 7 rounded up to 8
+        
+        // Run tokenization a few times to verify consistency
+        let mut pretokenized1 = PreTokenizedString::from(s);
+        pretok.pre_tokenize(&mut pretokenized1).unwrap();
+        
+        let mut pretokenized2 = PreTokenizedString::from(s);
+        pretok.pre_tokenize(&mut pretokenized2).unwrap();
+        
+        // Get the splits from both runs
+        let splits1 = pretokenized1
+            .get_splits(OffsetReferential::Original, OffsetType::Byte)
+            .into_iter()
+            .map(|(s, o, _)| (s, o))
+            .collect::<Vec<_>>();
+            
+        let splits2 = pretokenized2
+            .get_splits(OffsetReferential::Original, OffsetType::Byte)
+            .into_iter()
+            .map(|(s, o, _)| (s, o))
+            .collect::<Vec<_>>();
+        
+        // The two runs should produce identical results
+        assert_eq!(splits1, splits2);
+        
+        // Each chunk should have an even length
+        let avg_length = (pretok.min_length + pretok.max_length) / 2;
+        assert_eq!(avg_length % 2, 0, "Average length should be even");
+        
+        for (chunk, _) in splits1.iter().take(splits1.len() - 1) {  // Skip the last chunk
+            let chunk_chars = chunk.chars().count();
+            assert_eq!(chunk_chars % 2, 0, "Chunk length should be even");
             assert_eq!(chunk_chars, avg_length);
         }
     }

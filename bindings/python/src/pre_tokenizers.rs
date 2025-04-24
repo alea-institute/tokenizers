@@ -779,6 +779,9 @@ impl PyUnicodeScripts {
 ///         instead of random-length chunks, fixed-length chunks of average size 
 ///         between min_length and max_length will be used, ensuring consistent
 ///         tokenization for the same input.
+///     even_only (:obj:`bool`, `optional`, defaults to :obj:`False`):
+///         Whether to only use even-length chunks. When enabled, min_length and max_length
+///         will be adjusted to ensure they are even numbers.
 #[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name = "RandomChunkSplit")]
 pub struct PyRandomChunkSplit {}
 #[pymethods]
@@ -812,16 +815,51 @@ impl PyRandomChunkSplit {
     fn set_deterministic(self_: PyRef<Self>, deterministic: bool) {
         setter!(self_, RandomChunkSplit, deterministic, deterministic);
     }
+    
+    #[getter]
+    fn get_even_only(self_: PyRef<Self>) -> bool {
+        getter!(self_, RandomChunkSplit, even_only)
+    }
+
+    #[setter]
+    fn set_even_only(self_: PyRef<Self>, even_only: bool) {
+        setter!(self_, RandomChunkSplit, even_only, even_only);
+    }
+    
+    #[pyo3(signature = (even_only), text_signature = "(self, even_only) -> RandomChunkSplit")]
+    fn with_even_only(self_: PyRef<Self>, even_only: bool) -> PyResult<Py<PyPreTokenizer>> {
+        Python::with_gil(|py| {
+            let pretok = &self_.as_ref().pretok;
+            if let PyPreTokenizerTypeWrapper::Single(ref single) = pretok {
+                if let PyPreTokenizerWrapper::Wrapped(PreTokenizerWrapper::RandomChunkSplit(ref mut pretok)) =
+                    &mut *single.write().map_err(|_| 
+                        PyException::new_err("RwLock synchronisation primitive is poisoned"))?
+                {
+                    let new_pretok = pretok.clone().with_even_only(even_only);
+                    Ok(Py::new(
+                        py,
+                        PyPreTokenizer::new(PyPreTokenizerWrapper::Wrapped(PreTokenizerWrapper::RandomChunkSplit(new_pretok)).into()),
+                    )?)
+                } else {
+                    Err(PyException::new_err("Not a RandomChunkSplit"))
+                }
+            } else {
+                Err(PyException::new_err("Not a RandomChunkSplit"))
+            }
+        })
+    }
 
     #[new]
-    #[pyo3(signature = (min_length = 1, max_length = 5, deterministic = false), text_signature = "(self, min_length=1, max_length=5, deterministic=False)")]
-    fn new(min_length: usize, max_length: usize, deterministic: bool) -> (Self, PyPreTokenizer) {
-        (
-            PyRandomChunkSplit {},
-            RandomChunkSplit::new(min_length, max_length)
-                .with_deterministic(deterministic)
-                .into(),
-        )
+    #[pyo3(signature = (min_length = 1, max_length = 5, deterministic = false, even_only = false), text_signature = "(self, min_length=1, max_length=5, deterministic=False, even_only=False)")]
+    fn new(min_length: usize, max_length: usize, deterministic: bool, even_only: bool) -> (Self, PyPreTokenizer) {
+        let mut pretok = RandomChunkSplit::new(min_length, max_length)
+            .with_deterministic(deterministic);
+            
+        if even_only {
+            pretok = pretok.with_even_only(true);
+        }
+        
+        (PyRandomChunkSplit {}, pretok.into())
     }
 }
 
